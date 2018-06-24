@@ -1,0 +1,12 @@
+{
+	"name": "rvm",
+	"authors": [
+		"庄司明洋"
+	],
+	"dependencies": {
+		"pegged": "~>0.4.3"
+	},
+	"description": "A minimal D application.",
+	"copyright": "Copyright © 2018, 庄司明洋",
+	"license": "proprietary"
+}

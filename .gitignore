@@ -1,0 +1,14 @@
+.dub
+docs.json
+__dummy.html
+docs/
+rvm.so
+rvm.dylib
+rvm.dll
+rvm.a
+rvm.lib
+rvm-test-*
+*.exe
+*.o
+*.obj
+*.lst
