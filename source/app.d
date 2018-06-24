@@ -74,7 +74,7 @@ void main() {
 		Instruction[] program = [func(2, [leqi(F, 1), _if(B, [[retr(F)], [subi(F,
 				2), movr(C, A), pushr(F), callfar(2, [C]), movr(C, A), popto(F),
 				subi(F, 1), movr(D, A), pushr(C), callfar(2, [D]), popto(C), movr(D,
-				A), addr(C, D), retr(A)]])]), callfa(2, [35]), print(A)];
+				A), addr(C, D), retr(A)]])]), callfa(2, [30]), print(A)];
 		run(program);
 	}
 }
