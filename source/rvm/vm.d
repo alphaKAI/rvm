@@ -1,6 +1,7 @@
 module rvm.vm;
 import std.algorithm, std.string, std.array, std.range, std.regex, std.stdio;
 import rvm.instructions, rvm.utils;
+import core.thread;
 
 struct Registers {
   int a;
@@ -17,19 +18,55 @@ enum Register {
   C,
   D,
   E,
-  F
+  F,
 }
 
-Stack!int stack;
-Registers registers;
-Instruction[][int] functions;
+Thread[int] threads;
+Frame[int] frames;
 
-static this() {
-  stack = new Stack!int();
+class Frame {
+  Stack!int stack;
+  Registers registers;
+  Instruction[][int] functions;
+  Instruction[] prog;
+
+  this() {
+    this.stack = new Stack!int();
+  }
+
+  this(Instruction[] prog) {
+    this();
+    this.prog = prog.dup;
+  }
+
+  void setProg(Instruction[] prog) {
+    this.prog = prog.dup;
+  }
+
+  Frame dup() {
+    Frame newFrame = new Frame;
+
+    with (newFrame) {
+      stack = this.stack.dup;
+      registers = this.registers;
+      functions = this.functions.dup;
+      prog = this.prog.dup;
+    }
+
+    return newFrame;
+  }
 }
 
-void setRegister(Register r, int v) {
-  final switch (r) with (Register) {
+Frame genFrame() {
+  return new Frame;
+}
+
+Frame genFrame(Instruction[] prog) {
+  return new Frame(prog);
+}
+
+void setRegister(Frame frame, Register r, int v) {
+  with (frame) final switch (r) with (Register) {
   case A:
     registers.a = v;
     break;
@@ -51,8 +88,8 @@ void setRegister(Register r, int v) {
   }
 }
 
-int getRegister(Register r) {
-  final switch (r) with (Register) {
+int getRegister(Frame frame, Register r) {
+  with (frame) final switch (r) with (Register) {
   case A:
     return registers.a;
   case B:
@@ -68,13 +105,13 @@ int getRegister(Register r) {
   }
 }
 
-void popTo(Stack!int stack, Register r) {
+void popTo(Frame frame, Stack!int stack, Register r) {
   if (stack.empty) {
-    setRegister(r, 0);
+    frame.setRegister(r, 0);
   }
   else {
     int x = stack.pop;
-    setRegister(r, x);
+    frame.setRegister(r, x);
   }
 }
 
@@ -88,12 +125,14 @@ void reduceStack(Stack!int stack, int result, int function(int, int) f) {
   }
 }
 
-void saveFunction(int id, Instruction[] insts) {
-  functions[id] = insts;
+void saveFunction(Frame frame, int fid, Instruction[] insts) {
+  with (frame)
+    functions[fid] = insts;
 }
 
-Instruction[] getFunction(int id) {
-  return functions[id];
+Instruction[] getFunction(Frame frame, int fid) {
+  with (frame)
+    return functions[fid];
 }
 
 /*
@@ -104,52 +143,57 @@ Instruction[] getFunction(int id) {
   C -> 第4引数
 */
 
-void setArgs(int[] args) {
+void setArgs(Frame frame, int[] args) {
   with (Register) {
     enum rs = [F, E, D, C];
     foreach (i, v; args) {
-      setRegister(rs[i], v);
+      frame.setRegister(rs[i], v);
     }
   }
 }
 
-void compOpR2(T, alias pred)(Instruction inst) {
+void compOpR2(T, alias pred)(Frame frame, Instruction inst) {
   T v = cast(T)inst;
   Register x = v.r1, y = v.r2;
-  if (pred(getRegister(x), getRegister(y))) {
-    setRegister(Register.B, 1);
+  if (pred(frame.getRegister(x), frame.getRegister(y))) {
+    frame.setRegister(Register.B, 1);
   }
   else {
-    setRegister(Register.B, 0);
+    frame.setRegister(Register.B, 0);
   }
 }
 
-void compOpRI(T, alias pred)(Instruction inst) {
+void compOpRI(T, alias pred)(Frame frame, Instruction inst) {
   T v = cast(T)inst;
   Register x = v.r;
   int y = v.i;
-  if (pred(getRegister(x), y)) {
-    setRegister(Register.B, 1);
+  if (pred(frame.getRegister(x), y)) {
+    frame.setRegister(Register.B, 1);
   }
   else {
-    setRegister(Register.B, 0);
+    frame.setRegister(Register.B, 0);
   }
 }
 
-void arithmaticOpR2(T, alias pred)(Instruction inst) {
+void arithmaticOpR2(T, alias pred)(Frame frame, Instruction inst) {
   T v = cast(T)inst;
   Register x = v.r1, y = v.r2;
-  setRegister(Register.A, pred(getRegister(x), getRegister(y)));
+  frame.setRegister(Register.A, pred(frame.getRegister(x), frame.getRegister(y)));
 }
 
-void arithmaticOpRI(T, alias pred)(Instruction inst) {
+void arithmaticOpRI(T, alias pred)(Frame frame, Instruction inst) {
   T v = cast(T)inst;
   Register x = v.r;
   int y = v.i;
-  setRegister(Register.A, pred(getRegister(x), y));
+  frame.setRegister(Register.A, pred(frame.getRegister(x), y));
 }
 
-void run(Instruction[] prog) {
+void run(Frame frame) {
+  Instruction[] prog = frame.prog;
+  frame.run(prog);
+}
+
+void run(Frame frame, Instruction[] prog) {
   if (prog.empty) {
     //writeln("No more instruction");
   }
@@ -162,166 +206,167 @@ void run(Instruction[] prog) {
       Func func = cast(Func)inst;
       int id = func.id;
       Instruction[] proc = func.proc;
-      saveFunction(id, proc);
-      run(rest);
+      frame.saveFunction(id, proc);
       break;
     case InstructionType.CallF:
       CallF callf = cast(CallF)inst;
       int id = callf.id;
-      getFunction(id).run;
-      run(rest);
+      frame.run(frame.getFunction(id));
       break;
     case InstructionType.CallFA:
       CallFA callfa = cast(CallFA)inst;
       int id = callfa.id;
       int[] args = callfa.args;
-      setArgs(args);
-      getFunction(id).run;
-      run(rest);
+      frame.setArgs(args);
+      frame.run(frame.getFunction(id));
       break;
     case InstructionType.CallFAR:
       CallFAR callfar = cast(CallFAR)inst;
       int id = callfar.id;
       Register[] args = callfar.args;
-      args.map!(x => getRegister(x)).array.setArgs;
-      getFunction(id).run;
-      run(rest);
+      frame.setArgs(args.map!(x => frame.getRegister(x)).array);
+      frame.run(frame.getFunction(id));
       break;
     case InstructionType.HLT:
       writeln("execution stopped");
-      break;
+      return;
     case InstructionType.Print:
       Print print = cast(Print)inst;
       Register r = print.r;
-      writefln("%s : %d", r, getRegister(r));
-      run(rest);
+      writefln("%s : %d", r, frame.getRegister(r));
       break;
     case InstructionType.Eq:
-      compOpR2!(Eq, ((int x, int y) => x == y))(inst);
-      run(rest);
+      compOpR2!(Eq, ((int x, int y) => x == y))(frame, inst);
       break;
     case InstructionType.Neq:
-      compOpR2!(Neq, ((int x, int y) => x != y))(inst);
-      run(rest);
+      compOpR2!(Neq, ((int x, int y) => x != y))(frame, inst);
       break;
     case InstructionType.Leq:
-      compOpR2!(Leq, ((int x, int y) => x <= y))(inst);
-      run(rest);
+      compOpR2!(Leq, ((int x, int y) => x <= y))(frame, inst);
       break;
     case InstructionType.Geq:
-      compOpR2!(Geq, ((int x, int y) => x >= y))(inst);
-      run(rest);
+      compOpR2!(Geq, ((int x, int y) => x >= y))(frame, inst);
       break;
     case InstructionType.Lt:
-      compOpR2!(Lt, ((int x, int y) => x < y))(inst);
-      run(rest);
+      compOpR2!(Lt, ((int x, int y) => x < y))(frame, inst);
       break;
     case InstructionType.Gt:
-      compOpR2!(Lt, ((int x, int y) => x > y))(inst);
-      run(rest);
+      compOpR2!(Lt, ((int x, int y) => x > y))(frame, inst);
       break;
     case InstructionType.EqI:
-      compOpRI!(EqI, ((int x, int y) => x == y))(inst);
-      run(rest);
+      compOpRI!(EqI, ((int x, int y) => x == y))(frame, inst);
       break;
     case InstructionType.NeqI:
-      compOpRI!(NeqI, ((int x, int y) => x != y))(inst);
-      run(rest);
+      compOpRI!(NeqI, ((int x, int y) => x != y))(frame, inst);
       break;
     case InstructionType.LeqI:
-      compOpRI!(LeqI, ((int x, int y) => x <= y))(inst);
-      run(rest);
+      compOpRI!(LeqI, ((int x, int y) => x <= y))(frame, inst);
       break;
     case InstructionType.GeqI:
-      compOpRI!(GeqI, ((int x, int y) => x >= y))(inst);
-      run(rest);
+      compOpRI!(GeqI, ((int x, int y) => x >= y))(frame, inst);
       break;
     case InstructionType.LtI:
-      compOpRI!(LtI, ((int x, int y) => x < y))(inst);
-      run(rest);
+      compOpRI!(LtI, ((int x, int y) => x < y))(frame, inst);
       break;
     case InstructionType.GtI:
-      compOpRI!(GtI, ((int x, int y) => x > y))(inst);
-      run(rest);
+      compOpRI!(GtI, ((int x, int y) => x > y))(frame, inst);
       break;
     case InstructionType.If:
       If _if = cast(If)inst;
       Register r = _if.r;
       Instruction[][] insts = _if.insts;
 
-      if (getRegister(r) == 1) {
-        run(insts[0]);
+      if (frame.getRegister(r) == 1) {
+        frame.run(insts[0]);
       }
       else if (insts.length == 2) {
-        run(insts[1]);
+        frame.run(insts[1]);
       }
-      run(rest);
       break;
     case InstructionType.RetR:
       RetR retr = cast(RetR)inst;
       Register x = retr.r;
-      setRegister(Register.A, (getRegister(x)));
-      run(rest);
+      frame.setRegister(Register.A, (frame.getRegister(x)));
       break;
     case InstructionType.RetI:
       RetI reti = cast(RetI)inst;
       int x = reti.i;
-      setRegister(Register.A, x);
-      run(rest);
+      frame.setRegister(Register.A, x);
       break;
     case InstructionType.AddR:
-      arithmaticOpR2!(AddR, ((int x, int y) => x + y))(inst);
-      run(rest);
+      arithmaticOpR2!(AddR, ((int x, int y) => x + y))(frame, inst);
       break;
     case InstructionType.AddI:
-      arithmaticOpRI!(AddI, ((int x, int y) => x + y))(inst);
-      run(rest);
+      arithmaticOpRI!(AddI, ((int x, int y) => x + y))(frame, inst);
       break;
     case InstructionType.SubR:
-      arithmaticOpR2!(SubR, ((int x, int y) => x - y))(inst);
-      run(rest);
+      arithmaticOpR2!(SubR, ((int x, int y) => x - y))(frame, inst);
       break;
     case InstructionType.SubI:
-      arithmaticOpRI!(SubI, ((int x, int y) => x - y))(inst);
-      run(rest);
+      arithmaticOpRI!(SubI, ((int x, int y) => x - y))(frame, inst);
       break;
     case InstructionType.MulR:
-      arithmaticOpR2!(MulR, ((int x, int y) => x * y))(inst);
-      run(rest);
+      arithmaticOpR2!(MulR, ((int x, int y) => x * y))(frame, inst);
       break;
     case InstructionType.MulI:
-      arithmaticOpRI!(MulI, ((int x, int y) => x * y))(inst);
-      run(rest);
+      arithmaticOpRI!(MulI, ((int x, int y) => x * y))(frame, inst);
       break;
     case InstructionType.MovR:
       MovR movr = cast(MovR)inst;
       Register x = movr.r1, y = movr.r2;
-      setRegister(x, getRegister(y));
-      run(rest);
+      frame.setRegister(x, frame.getRegister(y));
       break;
     case InstructionType.MovI:
       MovI movi = cast(MovI)inst;
       Register x = movi.r;
       int y = movi.i;
-      setRegister(x, y);
-      run(rest);
+      frame.setRegister(x, y);
       break;
     case InstructionType.PopTo:
       PopTo popto = cast(PopTo)inst;
       Register r = popto.r;
-      popTo(stack, r);
-      run(rest);
+      frame.popTo(frame.stack, r);
       break;
     case InstructionType.PushR:
       PushR pr = cast(PushR)inst;
-      stack.push(getRegister(pr.r));
-      run(rest);
+      frame.stack.push(frame.getRegister(pr.r));
       break;
     case InstructionType.PushI:
       PushI pi = cast(PushI)inst;
-      stack.push(pi.i);
-      run(rest);
+      frame.stack.push(pi.i);
+      break;
+    case InstructionType.MTh:
+      MTh mth = cast(MTh)inst;
+      int id = mth.id;
+      Instruction[] _prog = mth.insts;
+      Frame newFrame = frame.dup;
+      newFrame.prog = _prog;
+      frames[id] = newFrame;
+      break;
+    case InstructionType.RTh:
+      RTh rth = cast(RTh)inst;
+      int id = rth.id;
+      threads[id] = new Thread(((Frame frame) => () { frame.run; })(frames[id])).start;
+      break;
+    case InstructionType.JTh:
+      JTh jth = cast(JTh)inst;
+      int id = jth.id;
+      if (threads[id]!is null) {
+        threads[id].join;
+        threads[id] = null;
+      }
+      break;
+    case InstructionType.SleepI:
+      SleepI sleepi = cast(SleepI)inst;
+      int msec = sleepi.msec;
+      Thread.sleep(dur!"msecs"(msec));
+      break;
+    case InstructionType.Printsln:
+      Printsln printsln = cast(Printsln)inst;
+      string msg = printsln.msg;
+      writeln(msg);
       break;
     }
+    frame.run(rest);
   }
 }

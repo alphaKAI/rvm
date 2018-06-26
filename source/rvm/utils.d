@@ -13,7 +13,19 @@ class Stack(T) {
 
   this(size_t capacity) {
     this.capacity = capacity;
-    stack.length = capacity;
+    this.stack.length = capacity;
+  }
+
+  typeof(this) dup() {
+    typeof(this) newStack = new typeof(this)(this.capacity);
+
+    with (newStack) {
+      count = this.count;
+      stack = this.stack.dup;
+      capacity = this.capacity;
+    }
+
+    return newStack;
   }
 
   @property T pop() {
@@ -30,8 +42,7 @@ class Stack(T) {
   }
 
   @property void push(T value) {
-    if (capacity - count + 1 < capacity / 4) {
-      // resize
+    if (count > capacity - (capacity / 8)) {
       stack.length += capacity;
     }
     stack[count++] = value;

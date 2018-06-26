@@ -34,7 +34,12 @@ enum InstructionType {
   MovI,
   PopTo,
   PushR,
-  PushI
+  PushI,
+  MTh,
+  RTh,
+  JTh,
+  SleepI,
+  Printsln
 }
 
 interface Instruction {
@@ -244,3 +249,80 @@ mixin(opRI!("MovI"));
 mixin(opR!("PopTo"));
 mixin(opR!("PushR"));
 mixin(opI!("PushI"));
+
+class MTh : Instruction {
+  int id;
+  Instruction[] insts;
+  this(int id, Instruction[] insts) {
+    this.id = id;
+    this.insts = insts;
+  }
+
+  InstructionType type() {
+    return InstructionType.MTh;
+  }
+}
+
+Instruction mth(int id, Instruction[] insts) {
+  return new MTh(id, insts);
+}
+
+class RTh : Instruction {
+  int id;
+  this(int id) {
+    this.id = id;
+  }
+
+  InstructionType type() {
+    return InstructionType.RTh;
+  }
+}
+
+Instruction rth(int id) {
+  return new RTh(id);
+}
+
+class JTh : Instruction {
+  int id;
+  this(int id) {
+    this.id = id;
+  }
+
+  InstructionType type() {
+    return InstructionType.JTh;
+  }
+}
+
+Instruction jth(int id) {
+  return new JTh(id);
+}
+
+class SleepI : Instruction {
+  int msec;
+  this(int msec) {
+    this.msec = msec;
+  }
+
+  InstructionType type() {
+    return InstructionType.SleepI;
+  }
+}
+
+Instruction sleepi(int msec) {
+  return new SleepI(msec);
+}
+
+class Printsln : Instruction {
+  string msg;
+  this(string msg) {
+    this.msg = msg;
+  }
+
+  InstructionType type() {
+    return InstructionType.Printsln;
+  }
+}
+
+Instruction printsln(string msg) {
+  return new Printsln(msg);
+}
